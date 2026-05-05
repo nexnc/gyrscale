@@ -2,5 +2,12 @@
 name = "scastra"
 version = "0.1.0"
 edition = "2024"
+authors = ["nexnc"]
+description = "A fast, diagnostic-focused system fetch and monitor tool built for NixOS."
+license = "MIT"
+repository = "https://github.com/nexnc/scastra"
+homepage = "https://github.com/nexnc/scastra"
+readme = "README.md"
 
 [dependencies]
+sysinfo = "0.30"
