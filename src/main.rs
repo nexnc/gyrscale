@@ -3,20 +3,36 @@ use sysinfo::System;
 fn main() {
     let mut sys = System::new_all();
     sys.refresh_all();
-    
+   
+    // Get OS Name
     if let Some(os_name) = System::name() {
         println!("OS Name: {}", os_name);
     }
 
-    // Get CPU Name
-    if let Some(cpu) = sys.cpus().first() {
-        println!("CPU Name {}", cpu.brand());
+    // Get System Name
+    if let Some(sys_name) = System::host_name() {
+        println!("Hostname: {}", sys_name);
     }
 
-    let used_ram = sys.used_memory() / 1024 / 1024 / 1024;
-    let total_ram = sys.total_memory() / 1024 / 1024 / 1024;
+    // Get Kernel Version
+    if let Some(kernel_ver) = System::kernel_version() {
+        println!("Kernel: {}", kernel_ver);
+    }
 
-    println!("RAM:    {} GB / {} GB", used_ram, total_ram);
+    // System Uptime
+    let uptime =  System::uptime();
+    let hours = uptime / 3600;
+    let minutes = (uptime % 3600) / 60;
+    println!("Uptime: {} hours {} minutes", hours, minutes);
 
+    // Get CPU Name
+    if let Some(cpu) = sys.cpus().first() {
+        println!("CPU: {}", cpu.brand());
+    }
+    
+    const GIB_CONV: f64 = 1024.0 * 1024.0 * 1024.0;
+    let used_ram = (sys.total_memory() - sys.available_memory()) as f64/ GIB_CONV;
+    let total_ram = sys.total_memory() as f64 / GIB_CONV;
 
+    println!("RAM: {:.2} GiB / {:.2} GiB ({:.0}%)", used_ram, total_ram, (used_ram/total_ram * 100.0));
 }
