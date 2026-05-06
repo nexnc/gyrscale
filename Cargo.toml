@@ -1,6 +1,6 @@
 [package]
 name = "scastra"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["nexnc"]
 description = "A fast, diagnostic-focused system fetch and monitor tool built for NixOS."
