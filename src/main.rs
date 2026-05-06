@@ -29,7 +29,16 @@ fn main() {
     if let Some(cpu) = sys.cpus().first() {
         println!("CPU: {}", cpu.brand());
     }
-    
+
+    // Get shell name
+    let shell = std::env::var("SHELL").unwrap_or("Unknown".to_string());
+    println!("Shell: {}", shell.split('/').last().unwrap_or("Unknown"));
+
+    // Get terminal name
+    let terminal = std::env::var("TERM").unwrap_or("Unknown".to_string());
+    println!("Terminal: {}", terminal);
+
+
     const GIB_CONV: f64 = 1024.0 * 1024.0 * 1024.0;
     let used_ram = (sys.total_memory() - sys.available_memory()) as f64/ GIB_CONV;
     let total_ram = sys.total_memory() as f64 / GIB_CONV;
