@@ -5,12 +5,12 @@ pub fn print_fetch(data: &SystemData) {
 
     println!();
     println!("[S Y S T E M   I N F O]");
-    println!("{}", separator);
-    println!("OS:     {}", data.os_name);
-    println!("OS Version: {}", data.os_version);
-    println!("Hostname: {}", data.host_name);
-    println!("Kernel: {}", data.kernel_version);
-    println!("Uptime: {}", data.format_uptime());
-    println!("Memory: {}", data.format_memory());
-    println!("{}\n", separator);
+    println!("{separator}");
+    println!("OS:     {0}", data.os_name);
+    println!("OS Version: {0}", data.os_version);
+    println!("Hostname: {0}", data.host_name);
+    println!("Kernel: {0}", data.kernel_version);
+    println!("Uptime: {0}", data.format_uptime());
+    println!("Memory: {0}", data.format_memory());
+    println!("{separator}\n");
 }
