@@ -11,6 +11,7 @@ pub struct SystemData {
     pub used_memory: u64,
 }
 
+#[must_use]
 pub fn gather_system_info() -> SystemData {
     let mut sys = System::new_all();
     
@@ -37,16 +38,20 @@ impl SystemData {
     pub fn format_uptime(&self) -> String {
         let hours = self.uptime / 3600;
         let minutes = (self.uptime % 3600) / 60;
-        format!("{}h {}m", hours, minutes)
+        format!("{hours}h {minutes}m")
     }
 
     #[must_use]
+//    #[allow(clippy::cast_precision_loss)]
     pub fn format_memory(&self) -> String {
 
-        let gibibyte = 1_073_741_824.0;
+        const GIB: u64 = 1_073_741_824;
 
-        let total_mem = self.total_memory as f64 / gibibyte;
-        let used_mem = self.used_memory as f64 / gibibyte;
-        format!("{:.2} GiB / {:.2} GiB", used_mem, total_mem)
+        let total_gib = self.total_memory / GIB;
+        let total_mem = (self.total_memory % GIB) * 100 / GIB;
+
+        let used_gib = self.used_memory / GIB;
+        let used_mem = (self.used_memory % GIB) * 100 / GIB;
+        format!("{used_gib}.{used_mem:02} GiB / {total_gib}.{total_mem:02} GiB")
     }
 }
