@@ -10,6 +10,8 @@ pub struct SystemData {
     pub terminal: String,
     pub shell: String,
     pub wm: String,
+    pub cursor: String,
+    pub cursor_size: String,
     pub kernel_version: String,
     pub cpu_arch: String,
     pub cpu: String,
@@ -42,6 +44,9 @@ pub fn gather_system_info() -> SystemData {
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or(raw_shell);
 
+    let cursor = std::env::var("XCURSOR_THEME").unwrap_or_else(|_| "Unknown Cursor".to_string());
+    let cursor_size = std::env::var("XCURSOR_SIZE").unwrap_or_else(|_| "Unknown Cursor Size".to_string());
+
     let wm = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "Unknown Desktop".to_string());
 
     let os_version = System::os_version().unwrap_or_else(|| "Unknown Version".to_string());
@@ -56,6 +61,8 @@ pub fn gather_system_info() -> SystemData {
         user,
         terminal,
         shell,
+        cursor,
+        cursor_size,
         wm,
         cpu_arch: System::cpu_arch(),
         core_count,
