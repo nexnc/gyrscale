@@ -1,3 +1,5 @@
+use std::fs;
+
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 
@@ -17,6 +19,9 @@ pub struct SystemData {
     pub cpu: String,
     pub core_count: usize,
     pub thread_count: usize,
+    pub cpu_freq: f64,
+    pub motherboard: String,
+    pub vendor: String,
     pub uptime: u64,
     pub total_memory: u64,
     pub used_memory: u64,
@@ -53,7 +58,14 @@ pub fn gather_system_info() -> SystemData {
     let core_count = System::physical_core_count().unwrap_or(0);
     let thread_count = cpus.len();
     let cpu = cpus.first().map_or_else(|| "Unknown CPU".to_string(), |c| c.brand().to_string());
-
+    let cpu_freq = fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
+    .ok()
+    .and_then(|s| s.trim().parse::<f64>().ok())
+    .map_or(0.0, |khz| khz / 1_000_000.0);
+    let vendor = std::fs::read_to_string("/sys/class/dmi/id/board_vendor")
+    .map_or_else(|_| String::new(), |s| s.trim().to_string());
+    let motherboard = fs::read_to_string("/sys/class/dmi/id/product_name")
+        .map_or_else(|_| "Unknown Board".to_string(), |s| s.trim().to_string());
     SystemData {
         os_name,
         os_version,
@@ -68,6 +80,9 @@ pub fn gather_system_info() -> SystemData {
         core_count,
         thread_count,
         cpu,
+        cpu_freq,
+        motherboard,
+        vendor,
         kernel_version,
         uptime: System::uptime(),
         total_memory: sys.total_memory(),
