@@ -1,11 +1,11 @@
-use std::collections::HashSet;
 use std::env;
-use std::fs;
+use std::ffi::{CStr, CString};
+use std::fs::File;
+use std::io::Read;
+use std::mem::MaybeUninit;
 use std::path::Path;
 
-use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
-
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SystemData {
     pub os_name: String,
     pub os_version: String,
@@ -32,7 +32,7 @@ pub struct SystemData {
     pub disks: Vec<DiskInfo>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DiskInfo {
     pub mount_point: String,
     pub used_space: u64,
@@ -40,79 +40,50 @@ pub struct DiskInfo {
     pub file_system: String,
 }
 
+#[inline]
+fn read_sysfs_trimmed(path: &str) -> Option<String> {
+    let mut buf = Vec::with_capacity(128);
+    let mut f = File::open(path).ok()?;
+    let n = f.read_to_end(&mut buf).ok()?;
+    let s = std::str::from_utf8(&buf[..n]).ok()?;
+    Some(s.trim().to_string())
+}
+
 #[must_use]
 pub fn gather_system_info() -> SystemData {
-    let refresh_kind = RefreshKind::nothing()
-        .with_cpu(CpuRefreshKind::everything())
-        .with_memory(MemoryRefreshKind::everything());
-    let sys = System::new_with_specifics(refresh_kind);
-    let cpus = sys.cpus();
+    let (os_name, os_version) = parse_os_release();
+    let (host_name, kernel_version, cpu_arch) = parse_uname();
+    let (cpu, core_count, thread_count) = parse_cpuinfo();
+    let (uptime, total_memory, used_memory, total_swap, used_swap) = parse_meminfo_and_sysinfo();
+    let disks = parse_disks();
 
-    let os_name = System::name().unwrap_or_else(|| "Unknown OS".to_string());
-    let kernel_version = System::kernel_version().unwrap_or_else(|| "Unknown Kernel".to_string());
-    let host_name = System::host_name().unwrap_or_else(|| "Unknown Host".to_string());
     let user = env::var("USER").unwrap_or_else(|_| "Unknown".to_string());
-    let terminal = env::var("TERM").unwrap_or_else(|_| "Unknown Terminal".to_string());
-    
+    let terminal = env::var("TERM_PROGRAM")
+        .or_else(|_| env::var("TERM"))
+        .unwrap_or_else(|_| "Unknown Terminal".to_string());
+
     let raw_shell = env::var("SHELL").unwrap_or_else(|_| "Unknown Shell".to_string());
     let shell = Path::new(&raw_shell)
         .file_name()
-        .map_or_else(|| raw_shell.clone(), |name| name.to_string_lossy().to_string());
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or(raw_shell);
 
     let cursor = env::var("XCURSOR_THEME").unwrap_or_else(|_| "Unknown Cursor".to_string());
     let cursor_size = env::var("XCURSOR_SIZE").unwrap_or_else(|_| "Unknown Cursor Size".to_string());
-    let wm = env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "Unknown Desktop".to_string());
+    let wm = env::var("XDG_CURRENT_DESKTOP")
+        .or_else(|_| env::var("DESKTOP_SESSION"))
+        .unwrap_or_else(|_| "Unknown Desktop".to_string());
 
-    let os_version = System::os_version().unwrap_or_else(|| "Unknown Version".to_string());
-    let core_count = System::physical_core_count().unwrap_or(0);
-    let thread_count = cpus.len();
-    let cpu = cpus
-        .first()
-        .map_or_else(|| "Unknown CPU".to_string(), |c| c.brand().to_string());
-
-    let cpu_freq = fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
-        .ok()
-        .and_then(|s| s.trim().parse::<f64>().ok())
+    let cpu_freq = read_sysfs_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
+        .or_else(|| read_sysfs_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq"))
+        .and_then(|s| s.parse::<f64>().ok())
         .map_or(0.0, |khz| khz / 1_000_000.0);
 
-    let vendor = fs::read_to_string("/sys/class/dmi/id/board_vendor")
-        .map_or_else(|_| String::new(), |s| s.trim().to_string());
-        
-    let motherboard = fs::read_to_string("/sys/class/dmi/id/product_name")
-        .map_or_else(|_| "Unknown Board".to_string(), |s| s.trim().to_string());
+    let vendor = read_sysfs_trimmed("/sys/class/dmi/id/board_vendor").unwrap_or_default();
 
-    let disks = Disks::new_with_refreshed_list();
-    let mut disk_list = Vec::new();
-    let mut seen_devices = HashSet::new();
-
-    for disk in disks.list() {
-        let fs_type = disk.file_system().to_string_lossy();
-        let mount = disk.mount_point().to_string_lossy();
-        let dev_name = disk.name().to_string_lossy().to_string();
-
-        // Skip virtual filesystems, boot partitions, or tiny partitions (< 1 GiB)
-        if fs_type == "overlay"
-            || fs_type == "tmpfs"
-            || mount.starts_with("/boot")
-            || disk.total_space() < 1_073_741_824
-        {
-            continue;
-        }
-
-        // Record each physical device partition only once
-        if seen_devices.insert(dev_name) {
-            let total = disk.total_space();
-            let available = disk.available_space();
-            let occupied = total.saturating_sub(available); // Replaced 'Total' with occupied to
-                                                            // pass clippy linting
-            disk_list.push(DiskInfo {
-                mount_point: mount.into_owned(),
-                used_space: occupied,
-                total_space: total,
-                file_system: fs_type.into_owned(),
-            });
-        }
-    }
+    let motherboard = read_sysfs_trimmed("/sys/class/dmi/id/product_name")
+        .or_else(|| read_sysfs_trimmed("/sys/class/dmi/id/board_name"))
+        .unwrap_or_else(|| "Unknown Board".to_string());
 
     SystemData {
         os_name,
@@ -121,24 +92,223 @@ pub fn gather_system_info() -> SystemData {
         user,
         terminal,
         shell,
+        wm,
         cursor,
         cursor_size,
-        wm,
-        cpu_arch: System::cpu_arch(),
+        kernel_version,
+        cpu_arch,
+        cpu,
         core_count,
         thread_count,
-        cpu,
         cpu_freq,
         motherboard,
         vendor,
-        kernel_version,
-        uptime: System::uptime(),
-        total_memory: sys.total_memory(),
-        used_memory: sys.used_memory(),
-        total_swap: sys.total_swap(),
-        used_swap: sys.used_swap(),
-        disks: disk_list,
+        uptime,
+        total_memory,
+        used_memory,
+        total_swap,
+        used_swap,
+        disks
     }
+}
+
+fn parse_uname() -> (String, String, String) {
+    let mut uts: libc::utsname = unsafe { MaybeUninit::zeroed().assume_init() };
+    if unsafe { libc::uname(&raw mut uts) } == 0 {
+        let hostname = unsafe { CStr::from_ptr(uts.nodename.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
+        let release = unsafe { CStr::from_ptr(uts.release.as_ptr()) }
+            .to_string_lossy()
+            .into_owned();
+        (hostname, release, env::consts::ARCH.to_string())
+    } else {
+        ("Unknown Host".to_string(), "Unknown Kernel".to_string(), env::consts::ARCH.to_string())
+    }
+}
+
+fn parse_meminfo_and_sysinfo() -> (u64, u64, u64, u64, u64) {
+    let mut uptime = 0u64;
+    let mut info: libc::sysinfo = unsafe { MaybeUninit::zeroed().assume_init() };
+    if unsafe { libc::sysinfo(&raw mut info) } == 0 {
+        uptime = info.uptime.cast_unsigned();
+    }
+
+    let mut buf = Vec::with_capacity(2048);
+    let n = File::open("/proc/meminfo")
+        .and_then(|mut f| f.read_to_end(&mut buf))
+        .unwrap_or(0);
+    let content = std::str::from_utf8(&buf[..n]).unwrap_or_default();
+
+    let mut total_mem_kb = 0u64;
+    let mut avail_mem_kb = 0u64;
+    let mut total_swap_kb = 0u64;
+    let mut free_swap_kb = 0u64;
+
+    for line in content.lines() {
+        let mut parts = line.split_whitespace();
+        let key = parts.next().unwrap_or_default();
+        let val = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+
+        match key {
+            "MemTotal:" => total_mem_kb = val,
+            "MemAvailable:" => avail_mem_kb = val,
+            "SwapTotal:" => total_swap_kb = val,
+            "SwapFree:" => free_swap_kb = val,
+            _ => {}
+        }
+    }
+
+    let total_memory = total_mem_kb * 1024;
+    let used_memory = total_mem_kb.saturating_sub(avail_mem_kb) * 1024;
+    let total_swap = total_swap_kb * 1024;
+    let used_swap = total_swap_kb.saturating_sub(free_swap_kb) * 1024;
+
+    (uptime, total_memory, used_memory, total_swap, used_swap)
+}
+
+fn parse_os_release() -> (String, String) {
+    let mut buf = Vec::with_capacity(1024);
+    let n = File::open("/etc/os-release")
+        .or_else(|_| File::open("/usr/lib/os-release"))
+        .and_then(|mut f| f.read_to_end(&mut buf))
+        .unwrap_or(0);
+
+    let content = std::str::from_utf8(&buf[..n]).unwrap_or_default();
+    let mut name = String::new();
+    let mut version_id = String::new();
+    let mut codename = String::new();
+
+    for line in content.lines() {
+        if let Some(val) = line.strip_prefix("NAME=") {
+            name = val.trim_matches('"').to_string();
+        } else if let Some(val) = line.strip_prefix("VERSION_ID=") {
+            version_id = val.trim_matches('"').to_string();
+        } else if let Some(val) = line.strip_prefix("VERSION_CODENAME=") {
+            codename = val.trim_matches('"').to_string();
+        }
+    }
+
+    if name.is_empty() {
+        name = "Linux".to_string();
+    }
+
+    let version = if codename.is_empty() {
+        version_id
+    } else if version_id.is_empty() {
+        codename
+    } else {
+        format!("{version_id} ({codename})")
+    };
+
+    (name, version)
+}
+
+fn parse_cpuinfo() -> (String, usize, usize) {
+    let mut buf = Vec::with_capacity(8192);
+    let mut cpu_name = String::new();
+    let mut thread_count = 0;
+    
+    // Stack-allocated array to track unique physical core IDs up to 256 cores 
+    // to avoid HashSet heap allocations.
+    let mut core_ids = [false; 256];
+
+    if let Ok(mut file) = File::open("/proc/cpuinfo")
+        && let Ok(n) = file.read_to_end(&mut buf) {
+            let s = std::str::from_utf8(&buf[..n]).unwrap_or_default();
+            for line in s.lines() {
+                if line.starts_with("processor") {
+                    thread_count += 1;
+                } else if cpu_name.is_empty()
+                    && (line.starts_with("model name")
+                        || line.starts_with("Hardware")
+                        || line.starts_with("Model"))
+                {
+                    if let Some((_, val)) = line.split_once(':') {
+                        cpu_name = val.trim().to_string();
+                    }
+                } else if line.starts_with("core id")
+                    && let Some((_, val)) = line.split_once(':')
+                        && let Ok(id) = val.trim().parse::<usize>()
+                            && id < 256 { 
+                                core_ids[id] = true;
+                            }
+            }
+        }
+
+    if cpu_name.is_empty() {
+        cpu_name = "Unknown CPU".to_string();
+    }
+
+    let physical_cores = core_ids.iter().filter(|&&b| b).count();
+    let core_count = if physical_cores == 0 { thread_count } else { physical_cores };
+    
+    // Fallback if /proc/cpuinfo completely fails
+    let thread_count = if thread_count == 0 { 
+        unsafe { usize::try_from(libc::sysconf(libc::_SC_NPROCESSORS_ONLN)) } 
+    } else { 
+        Ok(thread_count)
+    };
+
+    (cpu_name, core_count, thread_count.expect("NA"))
+}
+
+fn parse_disks() -> Vec<DiskInfo> {
+    let mut buf = Vec::with_capacity(8192);
+    let Ok(mut file) = File::open("/proc/self/mounts") else {
+        return Vec::new();
+    };
+
+    let n = file.read_to_end(&mut buf).unwrap_or(0);
+    let content = std::str::from_utf8(&buf[..n]).unwrap_or_default();
+    let mut disk_list = Vec::with_capacity(4);
+
+    for line in content.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(device) = parts.next() else { continue };
+        let Some(mount_point) = parts.next() else { continue };
+        let Some(fs_type) = parts.next() else { continue };
+
+        if !device.starts_with('/')
+            || fs_type == "tmpfs"
+            || fs_type == "overlay"
+            || fs_type == "devtmpfs"
+            || fs_type == "squashfs"
+            || mount_point.starts_with("/boot")
+            || mount_point.starts_with("/nix/store")
+            || mount_point.starts_with("/var/lib/containers")
+            || mount_point.starts_with("/var/lib/docker")
+        {
+            continue;
+        }
+
+        if disk_list.iter().any(|d: &DiskInfo| d.mount_point == mount_point) {
+            continue;
+        }
+
+        if let Ok(c_mount) = CString::new(mount_point) {
+            unsafe {
+                let mut stat: libc::statvfs = MaybeUninit::zeroed().assume_init();
+                if libc::statvfs(c_mount.as_ptr(), &raw mut stat) == 0 {
+                    let total = (stat.f_blocks).saturating_mul(stat.f_frsize);
+                    let available = (stat.f_bavail).saturating_mul(stat.f_frsize);
+
+                    if total < 1_073_741_824 {
+                        continue;
+                    }
+
+                    disk_list.push(DiskInfo {
+                        mount_point: mount_point.to_string(),
+                        used_space: total.saturating_sub(available),
+                        total_space: total,
+                        file_system: fs_type.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    disk_list
 }
 
 impl DiskInfo {
