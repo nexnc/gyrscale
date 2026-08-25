@@ -17,5 +17,8 @@ pub fn print_fetch(data: &SystemData) {
     println!("Motherboard: {0} {1}", data.vendor, data.motherboard);
     println!("Memory: {0}", data.format_memory());
     println!("Swap: {0}", data.format_swap());
-    println!("{separator}\n");
+    for disk in &data.disks {
+       println!("{}", disk.format_disk());
+    }
+    println!("{separator}");
 }
