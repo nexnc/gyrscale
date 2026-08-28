@@ -56,5 +56,11 @@ Since I am learning Rust while building this, the project is broken down into th
 cargo build --release
 ```
 
+<img width="989" height="438" alt="image" src="https://github.com/user-attachments/assets/359651fc-3e1c-49ac-afcc-9954d1dd3fc3" />
+
+<img width="989" height="438" alt="image" src="https://github.com/user-attachments/assets/1137dfb6-6682-4033-a4ab-7f5e4320a896" />
+
+
+
 ## License
 `MIT`
