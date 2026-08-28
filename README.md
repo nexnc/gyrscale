@@ -55,8 +55,8 @@ Since I am learning Rust while building this, the project is broken down into th
 ```bash
 cargo build --release
 ```
+<img width="937" height="433" alt="image" src="https://github.com/user-attachments/assets/2919be05-400b-4325-ba90-c60b9f23595c" />
 
-<img width="989" height="438" alt="image" src="https://github.com/user-attachments/assets/359651fc-3e1c-49ac-afcc-9954d1dd3fc3" />
 
 <img width="989" height="438" alt="image" src="https://github.com/user-attachments/assets/1137dfb6-6682-4033-a4ab-7f5e4320a896" />
 
